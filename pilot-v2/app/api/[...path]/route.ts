@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-import {SETUP_HASH} from '../../../lib/setup-config';
+const PILOT_PASSWORD_DIGEST='c026139a3c0d861ce3f2e7082c9f6c92567321a4fcc3bf28eb7bdb48b6a1b64c';
 export const dynamic='force-dynamic';
 const enc=new TextEncoder();
 const hex=(b:ArrayBuffer)=>Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -12,22 +12,30 @@ function err(message:string,status=400){return ok({error:message},status)}
 async function route(req:Request){
  const db=env.DB!;const path=new URL(req.url).pathname.slice(5);let body:any={};
  if(req.method==='POST'){if(Number(req.headers.get('content-length')||0)>20000)return err('Request too large',413);try{body=await req.json()}catch{return err('Invalid request')}}
- if(path==='status')return ok({configured:!!await db.prepare("SELECT key FROM pilot_settings WHERE key='setup'").first(),serverTime:Date.now()});
- if(path==='setup'&&req.method==='POST'){
-  if(!eq(await digest(String(body.setupKey||'')),SETUP_HASH))return err('Invalid setup link',403);
-  if(await db.prepare("SELECT key FROM pilot_settings WHERE key='setup'").first())return err('Already configured. Sign in with your pilot password.',409);
-  for(const k of ['adminPassword','nurse1Password','nurse2Password'])if(typeof body[k]!=='string'||body[k].length<10||body[k].length>128)return err('Choose passwords of 10–128 characters for all three accounts.');
-  const now=Date.now(),statements=[db.prepare("INSERT INTO pilot_settings(key,value) VALUES('setup',?)").bind(String(now))];
-  for(const [username,name,role,p] of [['admin','Pilot administrator','admin',body.adminPassword],['nurse1','Test Nurse A','nurse',body.nurse1Password],['nurse2','Test Nurse B','nurse',body.nurse2Password]]){const salt=random();statements.push(db.prepare('INSERT INTO pilot_users(id,username,name,role,password_hash,salt) VALUES(?,?,?,?,?,?)').bind(random(),username,name,role,await hash(p,salt),salt))}
-  for(let i=1;i<=5;i++)statements.push(db.prepare('INSERT INTO pilot_wards(id,name,floor,created_at) VALUES(?,?,?,?)').bind(i,['General Medicine','Surgical Ward','Critical Care','Paediatrics','Emergency'][i-1],i<4?'Ground floor':'First floor',now));
-  try{await db.batch(statements)}catch{return err('Setup already completed or could not be saved. Refresh and sign in.',409)}return ok({configured:true});
- }
+ if(path==='status')return ok({configured:true,sharedPassword:true,serverTime:Date.now()});
+ if(path==='setup')return err('No setup is needed. Use the shared pilot password on the sign-in page.',409);
  if(path==='login'&&req.method==='POST'){
-  const username=String(body.username||'').toLowerCase().trim();if(username.length>80||String(body.password||'').length>128)return err('Invalid credentials',401);
-  const key=await digest((req.headers.get('cf-connecting-ip')||'local')+':'+username),now=Date.now(),a:any=await db.prepare('SELECT * FROM pilot_attempts WHERE key=?').bind(key).first();if(a&&now-a.since<900000&&a.count>=8)return err('Too many attempts. Try again in 15 minutes.',429);
-  let u:any=await db.prepare('SELECT * FROM pilot_users WHERE username=? AND active=1').bind(username).first();
-  if(!u){const names=await db.prepare('SELECT * FROM pilot_users WHERE lower(name)=? AND active=1 LIMIT 2').bind(username).all();if(names.results.length===1)u=names.results[0];}
-  if(!u||!eq(await hash(String(body.password||''),u.salt),u.password_hash)){await db.prepare('INSERT INTO pilot_attempts(key,count,since) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN since<? THEN 1 ELSE count+1 END,since=CASE WHEN since<? THEN excluded.since ELSE since END').bind(key,now,now-900000,now-900000).run();return err('Incorrect username or password',401)}
+  const enteredName=String(body.name||body.username||'').trim().replace(/\s+/g,' '),username=enteredName.toLowerCase();
+  const role=body.role==='nurse'||(body.role!=='admin'&&username&&username!=='admin')?'nurse':'admin';
+  if(enteredName.length>80||String(body.password||'').length>128)return err('Invalid sign-in details',400);
+  const key=await digest((req.headers.get('cf-connecting-ip')||'local')+':shared-pilot'),now=Date.now(),a:any=await db.prepare('SELECT * FROM pilot_attempts WHERE key=?').bind(key).first();
+  if(a&&now-a.since<900000&&a.count>=8)return err('Too many attempts. Try again in 15 minutes.',429);
+  if(!eq(await digest(String(body.password||'')),PILOT_PASSWORD_DIGEST)){
+   await db.prepare('INSERT INTO pilot_attempts(key,count,since) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN since<? THEN 1 ELSE count+1 END,since=CASE WHEN since<? THEN excluded.since ELSE since END').bind(key,now,now-900000,now-900000).run();return err('Incorrect password',401);
+  }
+  if(role==='nurse'&&!enteredName)return err('Enter your name so scans can be recorded against you.');
+  const salt=random(),storedHash=await hash(String(body.password),salt);
+  const bootstrap=[db.prepare("INSERT OR IGNORE INTO pilot_settings(key,value) VALUES('setup',?)").bind(String(now)),db.prepare('INSERT OR IGNORE INTO pilot_users(id,username,name,role,password_hash,salt) VALUES(?,?,?,?,?,?)').bind(random(),'admin','Pilot administrator','admin',storedHash,salt)];
+  for(let i=1;i<=5;i++)bootstrap.push(db.prepare('INSERT OR IGNORE INTO pilot_wards(id,name,floor,created_at) VALUES(?,?,?,?)').bind(i,['General Medicine','Surgical Ward','Critical Care','Paediatrics','Emergency'][i-1],i<4?'Ground floor':'First floor',now));
+  await db.batch(bootstrap);
+  let u:any;
+  if(role==='admin')u=await db.prepare("SELECT * FROM pilot_users WHERE username='admin' AND role='admin' AND active=1").first();
+  else{
+   u=await db.prepare("SELECT * FROM pilot_users WHERE username=? AND role='nurse' AND active=1").bind(username).first();
+   if(!u){const matches=await db.prepare("SELECT * FROM pilot_users WHERE lower(name)=? AND role='nurse' AND active=1 LIMIT 2").bind(username).all();if(matches.results.length>1)return err('Two officers share this name. Use the officer ID shown by the administrator.',409);u=matches.results[0];}
+   if(!u){const id=random();await db.prepare('INSERT INTO pilot_users(id,username,name,role,password_hash,salt) VALUES(?,?,?,?,?,?)').bind(id,'officer-'+id.slice(0,8),enteredName,'nurse',storedHash,salt).run();u=await db.prepare('SELECT * FROM pilot_users WHERE id=?').bind(id).first();}
+  }
+  if(!u)return err('This pilot account is unavailable.',403);
   await db.prepare('DELETE FROM pilot_attempts WHERE key=?').bind(key).run();const token=random()+random();await db.prepare('INSERT INTO pilot_sessions(hash,user_id,expires_at) VALUES(?,?,?)').bind(await digest(token),u.id,now+8*3600000).run();return ok({token,user:{id:u.id,username:u.username,name:u.name,role:u.role}});
  }
  const token=req.headers.get('authorization')?.replace(/^Bearer /,'')||'';if(!token)return err('Sign in to live mode',401);

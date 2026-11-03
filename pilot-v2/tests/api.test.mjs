@@ -7,25 +7,28 @@ const sqlite=new DatabaseSync(':memory:');sqlite.exec(fs.readFileSync('drizzle/0
 class Statement{constructor(sql,args=[]){this.sql=sql;this.args=args}bind(...args){return new Statement(this.sql,args)}async first(){return sqlite.prepare(this.sql).get(...this.args)||null}async all(){return{results:sqlite.prepare(this.sql).all(...this.args)}}async run(){return{meta:sqlite.prepare(this.sql).run(...this.args)}}}
 const DB={prepare:sql=>new Statement(sql),batch:async ss=>{sqlite.exec('BEGIN');try{const result=[];for(const s of ss)result.push(await s.run());sqlite.exec('COMMIT');return result}catch(e){sqlite.exec('ROLLBACK');throw e}}};
 globalThis.__TEST_DB=DB;
-const localSetupKey='local-test-key-not-a-production-secret';
-const setupHash=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(localSetupKey))).toString('hex');
-let source=fs.readFileSync('app/api/[...path]/route.ts','utf8').replace("import {env} from 'cloudflare:workers';",'const env={DB:globalThis.__TEST_DB};').replace("import {SETUP_HASH} from '../../../lib/setup-config';",'const SETUP_HASH='+JSON.stringify(setupHash)+';');
+const password='Local-Shared-Pilot-Test';
+const testDigest=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(password))).toString('hex');
+let source=fs.readFileSync('app/api/[...path]/route.ts','utf8').replace("import {env} from 'cloudflare:workers';",'const env={DB:globalThis.__TEST_DB};').replace(/const PILOT_PASSWORD_DIGEST='[^']+';/,'const PILOT_PASSWORD_DIGEST='+JSON.stringify(testDigest)+';');
 const moduleCode=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
 const handler=await import('data:text/javascript;base64,'+Buffer.from(moduleCode).toString('base64'));
 async function call(path,body,token,want=200){const req=new Request('http://localhost/api/'+path,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const r=await (body?handler.POST:handler.GET)(req),out=await r.json();assert.equal(r.status,want,JSON.stringify(out));return out}
 let a,n1,n2;
-test('live pilot API integration: auth, roles, atomic scans, sticker versions and privacy',async()=>{
- assert.equal((await call('status')).configured,false);
+test('single password, no username/setup for admin, named nurse identity and movements',async()=>{
+ assert.equal((await call('status')).configured,true);
  await call('state',undefined,undefined,401);
- await call('setup',{setupKey:'wrong'},undefined,403);
- await call('setup',{setupKey:localSetupKey,adminPassword:'Local-Admin-Password',nurse1Password:'Local-Nurse1-Password',nurse2Password:'Local-Nurse2-Password'});
- await call('setup',{setupKey:localSetupKey},undefined,409);
- a=(await call('login',{username:'admin',password:'Local-Admin-Password'})).token;
- n1=(await call('login',{username:'nurse1',password:'Local-Nurse1-Password'})).token;
- n2=(await call('login',{username:'nurse2',password:'Local-Nurse2-Password'})).token;
- assert.equal((await call('login',{username:'Test Nurse A',password:'Local-Nurse1-Password'})).user.username,'nurse1');
- await call('login',{username:'nurse1',password:'incorrect'},undefined,401);
- let state=await call('state',undefined,a);assert.equal(state.wards.length,5);assert.equal(state.nurses.length,2);
+ await call('setup',{},undefined,409);
+ await call('login',{password:'wrong',role:'admin'},undefined,401);
+ a=(await call('login',{password,role:'admin'})).token;
+ assert.equal((await call('state',undefined,a)).wards.length,5);
+ n1=(await call('login',{name:'Siddhartha Aryan',password,role:'nurse'})).token;
+ n2=(await call('login',{name:'Test Nurse B',password,role:'nurse'})).token;
+ assert.equal((await call('state',undefined,n1)).user.name,'Siddhartha Aryan');
+ let state=await call('state',undefined,a);assert.equal(state.nurses.length,2);
+ const again=await call('login',{name:'  siddhartha   aryan  ',password,role:'nurse'});
+ assert.equal(again.user.id,(await call('state',undefined,n1)).user.id);
+ assert.equal((await call('state',undefined,a)).nurses.length,2);
+ await call('login',{name:'',password,role:'nurse'},undefined,400);
  await call('ward',{name:'Forbidden'},n1,403);
  await call('scan',{wardId:1,action:'IN',qrVersion:0},n1,409);
  await call('issue',{id:1},a);
@@ -45,7 +48,8 @@ test('live pilot API integration: auth, roles, atomic scans, sticker versions an
  await call('scan',{wardId:1,action:'IN',qrVersion:2},n1);
  await call('ward',{name:'Cardiology Pilot','floor':'Second floor'},a);
  state=await call('state',undefined,a);assert.equal(state.wards.length,6);assert.ok(state.wards[5].created_at);assert.ok(state.wards[0].qr_generated_at);
- assert.equal(sqlite.prepare('SELECT count(*) AS c FROM pilot_users WHERE password_hash LIKE ?').get('%Password%').c,0);
+ await call('login',{password,role:'admin'});
+ assert.equal((await call('state',undefined,a)).wards.length,6);
  await call('logout',{},n1);await call('state',undefined,n1,401);
 });
-test('login throttle rejects repeated invalid attempts',async()=>{for(let i=0;i<8;i++)await call('login',{username:'unknown',password:'wrong'},undefined,401);await call('login',{username:'unknown',password:'wrong'},undefined,429)});
+test('login throttle rejects repeated wrong shared passwords',async()=>{for(let i=0;i<8;i++)await call('login',{password:'wrong',role:'admin'},undefined,401);await call('login',{password:'wrong',role:'admin'},undefined,429)});
