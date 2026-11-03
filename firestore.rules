@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed(){return request.auth != null;}
+  function admin(){return signed() && exists(/databases/$(database)/documents/roles/$(request.auth.uid)) && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == 'admin';}
+  function nurse(){return signed() && exists(/databases/$(database)/documents/roles/$(request.auth.uid)) && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == 'nurse' && get(/databases/$(database)/documents/officers/$(request.auth.uid)).data.active == true;}
+  match /roles/{uid} {allow read: if signed() && (request.auth.uid == uid || admin()); allow write: if false;}
+  match /enrollmentRequests/{uid} {
+   allow read: if admin() || (signed() && request.auth.uid == uid);
+   allow create,update: if signed() && request.auth.uid == uid && request.resource.data.keys().hasOnly(['email','displayName','requestedAt']) && request.resource.data.email == request.auth.token.email && request.resource.data.displayName is string && request.resource.data.displayName.size() <= 150 && request.resource.data.requestedAt == request.time;
+   allow delete: if false;
+  }
+  match /officers/{uid} {allow read: if admin() || (nurse() && resource.data.uid == request.auth.uid);allow write: if false;}
+  match /wards/{wardId} {allow read: if admin() || nurse();allow write: if false;}
+  function validEvent(e){
+   let uid=request.auth.uid;
+   let beforeExists=exists(/databases/$(database)/documents/current/$(uid));
+   let prior=beforeExists?get(/databases/$(database)/documents/current/$(uid)).data:null;
+   return e.keys().hasOnly(['officerUid','wardId','action','at','prevEventId']) && e.officerUid == uid && e.at == request.time && e.wardId is int && e.wardId > 0 && get(/databases/$(database)/documents/wards/$(string(e.wardId))).data.enabled == true && e.prevEventId == (beforeExists?prior.lastEventId:null) && ((e.action == 'ENTRY' && (!beforeExists || prior.wardId == null)) || (e.action == 'EXIT' && beforeExists && prior.wardId == e.wardId));
+  }
+  function pairedState(eventId,e){
+   let state=getAfter(/databases/$(database)/documents/current/$(request.auth.uid)).data;
+   return state.lastEventId == eventId && state.officerUid == request.auth.uid && state.since == request.time && state.wardId == (e.action == 'ENTRY'?e.wardId:null);
+  }
+  match /events/{eventId} {
+   allow read: if admin() || (nurse() && resource.data.officerUid == request.auth.uid);
+   allow create: if nurse() && validEvent(request.resource.data) && pairedState(eventId,request.resource.data);
+   allow update,delete: if false;
+  }
+  match /current/{uid} {
+   allow read: if admin() || (nurse() && (uid == request.auth.uid || resource.data.officerUid == request.auth.uid));
+   allow create,update: if nurse() && request.auth.uid == uid && request.resource.data.keys().hasOnly(['officerUid','wardId','since','lastEventId']) && request.resource.data.officerUid == uid && request.resource.data.since == request.time && request.resource.data.lastEventId is string && !exists(/databases/$(database)/documents/events/$(request.resource.data.lastEventId)) && validEvent(getAfter(/databases/$(database)/documents/events/$(request.resource.data.lastEventId)).data) && pairedState(request.resource.data.lastEventId,getAfter(/databases/$(database)/documents/events/$(request.resource.data.lastEventId)).data);
+   allow delete: if false;
+  }
+  match /{document=**} {allow read,write: if false;}
+ }
+}

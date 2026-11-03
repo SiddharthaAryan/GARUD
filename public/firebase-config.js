@@ -1,0 +1,1 @@
+window.GARUD_CONFIG={apiKey:"AIzaSyCqjQxr8S5vPd1hgSLgMLHMfwUdjsuawZ4",authDomain:"garud-10e8d.firebaseapp.com",projectId:"garud-10e8d",storageBucket:"garud-10e8d.firebasestorage.app",messagingSenderId:"533519200480",appId:"1:533519200480:web:6af816fdf535510f46e085"};
