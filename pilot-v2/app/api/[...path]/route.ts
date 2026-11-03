@@ -23,9 +23,10 @@ async function route(req:Request){
   try{await db.batch(statements)}catch{return err('Setup already completed or could not be saved. Refresh and sign in.',409)}return ok({configured:true});
  }
  if(path==='login'&&req.method==='POST'){
-  const username=String(body.username||'').toLowerCase().trim();if(username.length>60||String(body.password||'').length>128)return err('Invalid credentials',401);
+  const username=String(body.username||'').toLowerCase().trim();if(username.length>80||String(body.password||'').length>128)return err('Invalid credentials',401);
   const key=await digest((req.headers.get('cf-connecting-ip')||'local')+':'+username),now=Date.now(),a:any=await db.prepare('SELECT * FROM pilot_attempts WHERE key=?').bind(key).first();if(a&&now-a.since<900000&&a.count>=8)return err('Too many attempts. Try again in 15 minutes.',429);
-  const u:any=await db.prepare('SELECT * FROM pilot_users WHERE username=? AND active=1').bind(username).first();
+  let u:any=await db.prepare('SELECT * FROM pilot_users WHERE username=? AND active=1').bind(username).first();
+  if(!u){const names=await db.prepare('SELECT * FROM pilot_users WHERE lower(name)=? AND active=1 LIMIT 2').bind(username).all();if(names.results.length===1)u=names.results[0];}
   if(!u||!eq(await hash(String(body.password||''),u.salt),u.password_hash)){await db.prepare('INSERT INTO pilot_attempts(key,count,since) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN since<? THEN 1 ELSE count+1 END,since=CASE WHEN since<? THEN excluded.since ELSE since END').bind(key,now,now-900000,now-900000).run();return err('Incorrect username or password',401)}
   await db.prepare('DELETE FROM pilot_attempts WHERE key=?').bind(key).run();const token=random()+random();await db.prepare('INSERT INTO pilot_sessions(hash,user_id,expires_at) VALUES(?,?,?)').bind(await digest(token),u.id,now+8*3600000).run();return ok({token,user:{id:u.id,username:u.username,name:u.name,role:u.role}});
  }

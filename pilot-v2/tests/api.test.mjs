@@ -23,6 +23,7 @@ test('live pilot API integration: auth, roles, atomic scans, sticker versions an
  a=(await call('login',{username:'admin',password:'Local-Admin-Password'})).token;
  n1=(await call('login',{username:'nurse1',password:'Local-Nurse1-Password'})).token;
  n2=(await call('login',{username:'nurse2',password:'Local-Nurse2-Password'})).token;
+ assert.equal((await call('login',{username:'Test Nurse A',password:'Local-Nurse1-Password'})).user.username,'nurse1');
  await call('login',{username:'nurse1',password:'incorrect'},undefined,401);
  let state=await call('state',undefined,a);assert.equal(state.wards.length,5);assert.equal(state.nurses.length,2);
  await call('ward',{name:'Forbidden'},n1,403);
