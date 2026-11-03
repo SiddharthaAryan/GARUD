@@ -1,17 +1,12 @@
-# Pilot status — 3 November 2026
+# Current pilot status — 3 November 2026
 
-- Frontend: https://siddharthaaryan.github.io/GARUD/public/
-- Synthetic demo: https://siddharthaaryan.github.io/GARUD/public/?demo=1
-- Firebase project garud-10e8d uses the Spark plan. Firestore is in asia-south1 (Mumbai).
-- Tested role-based, atomic movement rules are published. Ten emulator security tests passed.
-- Google sign-in enabled; siddharthaaryan.github.io authorized after explicit user approval.
-- Google sign-in successfully completed with the selected project-owner account. GARUD displayed the expected awaiting-approval state and submitted an enrollment request.
-- Composite index events(officerUid ASC, at DESC), collection scope: creation succeeded.
-- One illustrative cloud ward exists: wards/1, enabled=true, name=General medicine · PILOT.
-- The deployed synthetic demo was tested for entry/exit, name/ID search, officer charts, map and QR generation.
-- No staff roles approved, no real staff roster imported, no Dr. Pawan account created. The cloud roster is empty.
-- Automatic approval review rejected saving a pilot role for the selected Google account because role assignment was not explicitly authorized. No role was saved. Explicit approval to grant the named account an administrator role is pending.
-- Cloud movement is not yet end-to-end verified; an explicitly approved pilot account is required.
-- Firebase Hosting was not deployed because embedded Cloud Shell returned Site Unavailable. GitHub Pages hosts the frontend.
+Version 2 is deployed at https://garud-live-pilot.aryansiddhartha03.chatgpt.site. GitHub Pages entrypoints redirect to this viewable version.
 
-This is a pilot, not production-ready tracking of 600 real nurses. The demo contains 600 synthetic officers. No patient data is required.
+- Synthetic walkthrough: 600 sample officers, five wards, eight narrated steps, pause/next/reset, map counts, personal time charts, directory and movement log.
+- Live pilot: server API and D1 storage; separate from the earlier Firebase project. First-time password setup creates admin, nurse1, nurse2 and five wards. User chooses passwords; no passwords or raw setup key are in source.
+- QR generator: separate /qr route, admin-only ward creation/naming, sticker generation timestamp/version, printable IN/OUT posters; reissue invalidates old codes.
+- API tests passed for setup, login, role separation, two nurses, valid IN/OUT, duplicate and wrong-ward rejection, stale stickers, record isolation, timestamped ward creation, logout and login throttling.
+- Production build and TypeScript checks passed. Published walkthrough start/pause/next behavior verified in browser.
+- Production live scan recording remains awaiting the owner's first-time password setup. No live staff accounts/passwords have been initialized yet; the production database contains schema only.
+
+Earlier Firebase setup remains separate: Google sign-in/domain and Firestore rules/index were configured, but no roles were assigned. Its account-approval gate is not used by version 2.

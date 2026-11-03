@@ -1,0 +1,1 @@
+export const SETUP_HASH='7fac5e9897ab05a13ea002cc3995a62c0fac074ea7d30ffd5eb544bbd4ee56c8';
