@@ -16,7 +16,7 @@ if(params.has('ward')&&params.get('demo')==='1'){document.getElementById('scanWa
  if(params.get('demo')==='1'||!window.GARUD_CONFIG?.projectId){document.getElementById('authStatus').textContent='Cloud project not configured.';return;}
  window.garudLive=true;
  const gate=document.getElementById('gate'),status=document.getElementById('authStatus');gate.classList.remove('hidden');
- document.getElementById('modeLabel').textContent='CLOUD PILOT · AUTHENTICATION REQUIRED';
+ document.getElementById('modeLabel').textContent='CLOUD PILOT · AUTHENTICATION REQUIRED';document.querySelector('.top .tag').textContent='● Cloud pilot · last recorded scans';
  const fail=message=>{const e=document.getElementById('cloudError');e.textContent=message;e.classList.remove('hidden');};
  try{
  const [appSDK,authSDK,dbSDK]=await Promise.all([import('https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js'),import('https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js'),import('https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js')]);
