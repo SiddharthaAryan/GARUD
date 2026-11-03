@@ -10,7 +10,26 @@ type Data={wards:Ward[],nurses:Nurse[],events:Event[],serverTime:number,user?:an
 const colors=['#d8a447','#23639b','#278f81','#b85d6c','#8a73aa','#dc8f4e'];
 const wardSeed:Ward[]=['General Medicine','Surgical Ward','Critical Care','Paediatrics','Emergency'].map((name,i)=>({id:i+1,name,floor:i<3?'Ground floor':'First floor'}));
 const t0=new Date().setHours(8,0,0,0);
-function seed():Data{let nurses:Nurse[]=Array.from({length:600},(_,i)=>({id:'d'+(i+1),username:'NO'+String(i+1).padStart(4,'0'),name:i===0?'Ananya Sharma':i===1?'Meera Singh':['Priya','Kiran','Neha','Rohan','Arjun','Ishita'][i%6]+' '+['Kaur','Verma','Kumar','Raina','Das'][i%5]+' '+(Math.floor(i/30)+1),ward_id:i<80?(i%5)+1:null,since:i<80?t0:i<100?t0+40*60000:null}));nurses[0].ward_id=1;nurses[0].since=t0+65*60000;nurses[1].ward_id=5;let events:Event[]=nurses.slice(0,100).map((n,i)=>({id:'s'+i,user_id:n.id,ward_id:n.ward_id||i%5+1,action:'IN',at:t0}));for(let i=80;i<100;i++)events.push({id:'o'+i,user_id:nurses[i].id,ward_id:i%5+1,action:'OUT',at:t0+40*60000});events=events.filter(e=>e.user_id!=='d1');events.push({id:'a',user_id:'d1',ward_id:1,action:'IN',at:t0},{id:'b',user_id:'d1',ward_id:1,action:'OUT',at:t0+25*60000},{id:'c',user_id:'d1',ward_id:2,action:'IN',at:t0+30*60000},{id:'d',user_id:'d1',ward_id:2,action:'OUT',at:t0+60*60000},{id:'e',user_id:'d1',ward_id:1,action:'IN',at:t0+65*60000});return{wards:wardSeed.map(w=>({...w})),nurses,events,serverTime:t0+80*60000}}
+function seed():Data{
+ const nurses:Nurse[]=Array.from({length:600},(_,i)=>({id:'d'+(i+1),username:'NO'+String(i+1).padStart(4,'0'),name:i===0?'Ananya Sharma':i===1?'Meera Singh':['Priya','Kiran','Neha','Rohan','Arjun','Ishita'][i%6]+' '+['Kaur','Verma','Kumar','Raina','Das'][i%5]+' '+(Math.floor(i/30)+1),ward_id:null,since:null}));
+ const events:Event[]=[];
+ // Illustrative histories, not measured staffing or travel benchmarks.
+ for(let i=0;i<100;i++){
+  const n=nurses[i],current=i===0?1:i===1?5:i%5+1;
+  const count=i%4===0?3:2;
+  let minute=-60-(i%7)*6;
+  const add=(ward:number,action:string)=>events.push({id:`seed-${n.id}-${events.length}`,user_id:n.id,ward_id:ward,action,at:t0+minute*60000});
+  for(let leg=0;leg<count;leg++){
+   const room=leg===count-1?current:((current-1+(count-1-leg)*(i%2+1))%5)+1;
+   add(room,'IN');
+   if(leg===count-1&&i<80){n.ward_id=room;n.since=t0+minute*60000;break}
+   minute+=18+(i*7+leg*11)%17;
+   add(room,'OUT');n.since=t0+minute*60000;
+   minute+=3+(i+leg*3)%6;
+  }
+ }
+ return{wards:wardSeed.map(w=>({...w})),nurses,events:events.sort((a,b)=>a.at-b.at),serverTime:t0+80*60000}
+}
 const steps=[{id:'d1',action:'OUT',ward:1,text:'Ananya scans OUT at General Medicine. Her dot leaves Ward 1; outside-ward time begins.'},{id:'d1',action:'IN',ward:2,text:'Ananya scans IN at Surgical Ward. Ward 2 gains one officer, and her Surgical Ward slice grows.'},{id:'d2',action:'OUT',ward:5,text:'Meera leaves Emergency. Its recorded coverage falls by one; the event is added to the log.'},{id:'d1',action:'OUT',ward:2,text:'Ananya leaves Surgical Ward. Her completed interval is now visible in her time breakdown.'},{id:'d1',action:'IN',ward:3,text:'Ananya enters Critical Care. The map and her personal chart update together.'},{id:'d2',action:'IN',ward:4,text:'Meera enters Paediatrics. Both officers now have separate, traceable movement histories.'},{id:'d1',action:'OUT',ward:3,text:'Ananya leaves Critical Care. Her recorded state is outside wards, without assuming absence.'},{id:'d1',action:'IN',ward:1,text:'Ananya returns to General Medicine. Her full route is visible in the timeline.'}];
 function fmt(t:number|null|undefined){return t?new Date(t).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'No scan'}
 function full(t:number|null|undefined){return t?new Date(t).toLocaleString('en-IN'):'Not issued yet'}
